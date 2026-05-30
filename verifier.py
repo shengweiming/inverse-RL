@@ -22,26 +22,6 @@ def reference_apply(chain: Sequence[str], x: str) -> str:
     return value
 
 
-def _reference_apply_on_declared_domains(chain: Sequence[str], x: str) -> str | None:
-    """Apply ``chain`` only while each skill round-trips on its declared domain.
-
-    Some provided skills are injective only on their sampled/domain-filtered
-    inputs. For inverse reward, model-proposed preimages must stay inside those
-    domains; otherwise a malformed string can collide under the raw forward
-    implementation (for example odd-length ``riffle_shuffle`` inputs drop a
-    character). The trusted inverse functions are used only as domain witnesses:
-    each forward step must satisfy ``inverse(forward(value)) == value``.
-    """
-    value = x
-    for name in chain:
-        forward, inverse, _sampler, kwargs, _tier, _origin = SKILLS[name]
-        next_value = forward(value, **kwargs)
-        if inverse(next_value, **kwargs) != value:
-            return None
-        value = next_value
-    return value
-
-
 def forward_reward(completion_text: str, problem: dict[str, Any]) -> float:
     """Reward exact JSON ``output`` matches for forward/composition tasks."""
     parsed = extract_last_json(completion_text)
@@ -51,7 +31,7 @@ def forward_reward(completion_text: str, problem: dict[str, Any]) -> float:
 
 
 def inverse_reward(completion_text: str, problem: dict[str, Any]) -> float:
-    """Reward exact in-domain preimages for inverse tasks."""
+    """Reward exact preimages using the trusted forward reference."""
     parsed = extract_last_json(completion_text)
     if parsed is None:
         return 0.0
@@ -61,7 +41,7 @@ def inverse_reward(completion_text: str, problem: dict[str, Any]) -> float:
         return 0.0
 
     try:
-        predicted_output = _reference_apply_on_declared_domains(problem["chain"], candidate)
+        predicted_output = reference_apply(problem["chain"], candidate)
     except (KeyError, TypeError):
         return 0.0
     return 1.0 if predicted_output == problem.get("output") else 0.0

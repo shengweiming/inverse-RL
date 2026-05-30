@@ -59,12 +59,15 @@ def test_missing_or_non_string_inverse_input_scores_zero():
     assert inverse_reward('{"input": 123}', problem) == 0.0
 
 
-def test_inverse_reward_rejects_candidate_outside_skill_domain():
-    problem = {"chain": ["riffle_shuffle"], "input": "abcdef", "output": "adbecf"}
+def test_inverse_reward_uses_reference_apply_semantics_for_multi_step_chains():
+    problem = {
+        "chain": ["insert_separator", "insert_separator"],
+        "input": "texq",
+        "output": "t---e---x---q",
+    }
 
-    assert reference_apply(["riffle_shuffle"], "abcdefZ") == problem["output"]
-    assert inverse_reward('{"input": "abcdef"}', problem) == 1.0
-    assert inverse_reward('{"input": "abcdefZ"}', problem) == 0.0
+    assert reference_apply(problem["chain"], problem["input"]) == problem["output"]
+    assert inverse_reward('{"input": "texq"}', problem) == 1.0
 
 
 def test_batch_rewards_map_completion_to_problem_by_index():
