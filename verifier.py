@@ -31,7 +31,7 @@ def forward_reward(completion_text: str, problem: dict[str, Any]) -> float:
 
 
 def inverse_reward(completion_text: str, problem: dict[str, Any]) -> float:
-    """Reward exact preimages for inverse tasks via trusted forward execution."""
+    """Reward exact preimages using the trusted forward reference."""
     parsed = extract_last_json(completion_text)
     if parsed is None:
         return 0.0
@@ -47,24 +47,71 @@ def inverse_reward(completion_text: str, problem: dict[str, Any]) -> float:
     return 1.0 if predicted_output == problem.get("output") else 0.0
 
 
+def _is_batched_column(value: Any, n_items: int) -> bool:
+    """Return True if ``value`` looks like a per-example batch column."""
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes)) and len(value) == n_items
+
+
+def _column_value_at(key: str, value: Any, index: int, n_items: int) -> Any:
+    """Read one example from a TRL/HF-style keyword column."""
+    if key == "chain" and isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        # A single example may be passed as chain=["f1", "f2"] rather than
+        # chain=[["f1", "f2"]]. Preserve that full chain for n=1.
+        if n_items == 1 and all(isinstance(item, str) for item in value):
+            return list(value)
+
+    if _is_batched_column(value, n_items):
+        item = value[index]
+        # Be permissive for callers that batch level-1 chains as skill-name
+        # strings rather than one-element lists.
+        if key == "chain" and isinstance(item, str):
+            return [item]
+        return item
+
+    return value
+
+
 def _resolve_problems(
     completions: Sequence[str],
-    problems: Sequence[dict[str, Any]] | None = None,
+    problems: Sequence[dict[str, Any]] | dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> Sequence[dict[str, Any]]:
-    """Resolve TRL-style problem columns into a per-completion sequence."""
+    """Resolve nested or columnar TRL problem data into per-completion dicts."""
+    n_items = len(completions)
+
     if problems is None:
         problems = kwargs.get("problems") or kwargs.get("problem")
-    if problems is None:
-        raise ValueError("batch reward requires a problems/problem sequence")
-    if len(problems) != len(completions):
-        raise ValueError("number of problems must match number of completions")
-    return problems
+
+    if problems is not None:
+        if isinstance(problems, dict):
+            if n_items != 1:
+                raise ValueError("a single problem dict can only be used with one completion")
+            return [problems]
+        if len(problems) != n_items:
+            raise ValueError("number of problems must match number of completions")
+        return problems
+
+    problem_keys = {
+        key
+        for key in kwargs
+        if not key.startswith("_") and key not in {"completion", "completions", "prompt", "prompts"}
+    }
+    if not ({"chain", "output"} & problem_keys):
+        raise ValueError("batch reward requires problem dicts or problem columns")
+
+    resolved: list[dict[str, Any]] = []
+    for index in range(n_items):
+        problem = {
+            key: _column_value_at(key, kwargs[key], index, n_items)
+            for key in problem_keys
+        }
+        resolved.append(problem)
+    return resolved
 
 
 def batch_forward_reward(
     completions: Sequence[str],
-    problems: Sequence[dict[str, Any]] | None = None,
+    problems: Sequence[dict[str, Any]] | dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> list[float]:
     """Vectorized forward reward for TRL reward callbacks."""
@@ -74,7 +121,7 @@ def batch_forward_reward(
 
 def batch_inverse_reward(
     completions: Sequence[str],
-    problems: Sequence[dict[str, Any]] | None = None,
+    problems: Sequence[dict[str, Any]] | dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> list[float]:
     """Vectorized inverse reward for TRL reward callbacks."""

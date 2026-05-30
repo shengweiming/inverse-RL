@@ -59,6 +59,17 @@ def test_missing_or_non_string_inverse_input_scores_zero():
     assert inverse_reward('{"input": 123}', problem) == 0.0
 
 
+def test_inverse_reward_uses_reference_apply_semantics_for_multi_step_chains():
+    problem = {
+        "chain": ["insert_separator", "insert_separator"],
+        "input": "texq",
+        "output": "t---e---x---q",
+    }
+
+    assert reference_apply(problem["chain"], problem["input"]) == problem["output"]
+    assert inverse_reward('{"input": "texq"}', problem) == 1.0
+
+
 def test_batch_rewards_map_completion_to_problem_by_index():
     problems = [
         {"chain": ["reverse"], "output": "cba"},
@@ -66,3 +77,17 @@ def test_batch_rewards_map_completion_to_problem_by_index():
     ]
     assert batch_inverse_reward(['{"input": "abc"}', '{"input": "aBc"}'], problems) == [1.0, 1.0]
     assert batch_forward_reward(['{"output": "cba"}', '{"output": "wrong"}'], problems=problems) == [1.0, 0.0]
+
+
+def test_batch_rewards_reconstruct_problems_from_dataset_columns():
+    assert batch_inverse_reward(
+        ['{"input": "abc"}', '{"input": "aBc"}'],
+        chain=[["reverse"], ["swap_case"]],
+        output=["cba", "AbC"],
+    ) == [1.0, 1.0]
+
+    assert batch_forward_reward(
+        ['{"output": "cba"}', '{"output": "wrong"}'],
+        chain=[["reverse"], ["swap_case"]],
+        output=["cba", "AbC"],
+    ) == [1.0, 0.0]
