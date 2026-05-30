@@ -8,17 +8,20 @@ from skills_inverse import SKILLS
 from verifier import reference_apply
 
 
-def test_hidden_code_uses_only_remapped_identifiers():
+def test_rendered_code_includes_remapped_skill_definitions():
     chain = ["reverse", "shift_chars", "vigenere"]
     code = render_code(chain, show_defs=False)
-    assert code == "def main_solution(x):\n    return func_22(func_4(func_0(x)))"
-    assert "def func_" not in code
-    assert code.count("def ") == 1
-    assert "main_solution" in code
-    for name in SKILLS:
-        assert name not in code
+    namespace = {}
+    exec(code, namespace)
+    sample = "abcdef"
+    assert namespace["main_solution"](sample) == reference_apply(chain, sample)
+    assert "def main_solution(x):\n    return func_22(func_4(func_0(x)))" in code
+    assert code.count("def func_") == len(chain)
+    assert "def reverse" not in code
+    assert "def shift_chars" not in code
+    assert "def vigenere" not in code
     for name in chain:
-        assert ID_MAP[name] in code
+        assert f"def {ID_MAP[name]}" in code
 
 
 @pytest.mark.parametrize("task", ["forward", "inverse"])
@@ -33,11 +36,13 @@ def test_generated_problem_round_trips_and_uses_true_chain(task):
     assert reference_apply(problem["chain"], problem["input"]) == problem["output"]
 
     code = problem["code"]
-    assert code.startswith("def main_solution(x):\n    return ")
-    assert code.count("def ") == 1
+    namespace = {}
+    exec(code, namespace)
+    assert namespace["main_solution"](problem["input"]) == problem["output"]
+    assert code.count("def func_") == len(set(problem["chain"]))
     assert "func_" in code
     for name in SKILLS:
-        assert name not in code
+        assert f"def {name}" not in code
 
 
 def test_forward_gen_code_is_self_contained_and_executable():
@@ -47,6 +52,7 @@ def test_forward_gen_code_is_self_contained_and_executable():
     namespace = {}
     exec(problem["gen_code"], namespace)
     assert namespace["main_solution"](problem["input"]) == problem["output"]
+    assert problem["gen_code"] == problem["code"]
     assert problem["gen_prompt"] is not None
 
 

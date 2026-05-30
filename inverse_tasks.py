@@ -1,8 +1,9 @@
 """Deterministic JSONL task generation for inverse-RL experiments.
 
 The generated ``chain`` always stores true ``skills_inverse.SKILLS`` names for
-trusted verification. The rendered code shown to the model is decontaminated by
-remapping those names to meaningless ``func_N`` identifiers.
+trusted verification. The rendered code shown to the model includes the atomic
+function definitions and ``main_solution`` while decontaminating true skill names
+into meaningless ``func_N`` identifiers.
 """
 
 from __future__ import annotations
@@ -48,20 +49,20 @@ _HELPER_PREAMBLE = '''from math import gcd
 _LO, _HI = 32, 126
 _SPAN = _HI - _LO + 1
 
-def _atbash_ch(c):
+def _helper_0(c):
     if 'a' <= c <= 'z':
         return chr(ord('z') - (ord(c) - ord('a')))
     if 'A' <= c <= 'Z':
         return chr(ord('Z') - (ord(c) - ord('A')))
     return c
 
-def _mult(L):
+def _helper_1(L):
     m = 3
     while gcd(m, L) != 1:
         m += 2
     return m
 
-def _vig(s, key, sign):
+def _helper_2(s, key, sign):
     out = []
     j = 0
     for c in s:
@@ -75,8 +76,13 @@ def _vig(s, key, sign):
 '''
 
 
-def _replace_skill_names(source: str) -> str:
-    """Replace true skill identifiers with func_N names in rendered code."""
+HELPER_ID_MAP: dict[str, str] = {"_atbash_ch": "_helper_0", "_mult": "_helper_1", "_vig": "_helper_2"}
+
+
+def _replace_render_names(source: str) -> str:
+    """Replace true skill/helper identifiers with decontaminated render names."""
+    for true_name, render_name in HELPER_ID_MAP.items():
+        source = re.sub(rf"\b{re.escape(true_name)}\b", render_name, source)
     if not ID_MAP:
         return source
     pattern = re.compile(r"\b(" + "|".join(re.escape(name) for name in sorted(ID_MAP, key=len, reverse=True)) + r")\b")
@@ -93,20 +99,18 @@ def _expression(chain: Sequence[str]) -> str:
 def render_code(chain: Sequence[str], show_defs: bool = False) -> str:
     """Render a ``main_solution`` snippet for a true-name skill chain.
 
-    ``show_defs=False`` is the canonical hidden-definition form used for all
-    train/eval/reward prompts. ``show_defs=True`` is only for Stage-1 forward
-    rejection-sampling and includes trusted reference definitions.
+    All rendered snippets include the atomic function definitions used by the
+    chain plus ``main_solution``, matching the canonical task format. True
+    registry names are still decontaminated to stable ``func_N`` identifiers;
+    ``show_defs`` is retained for compatibility with earlier callers.
     """
     _validate_chain(chain)
     main = f"def main_solution(x):\n    return {_expression(chain)}"
-    if not show_defs:
-        return _replace_skill_names(main)
-
     definitions: list[str] = []
     for name in dict.fromkeys(chain):
         forward = SKILLS[name][0]
         definitions.append(inspect.getsource(forward).strip())
-    return _replace_skill_names(_HELPER_PREAMBLE.strip() + "\n\n" + "\n\n".join(definitions) + "\n\n" + main)
+    return _replace_render_names(_HELPER_PREAMBLE.strip() + "\n\n" + "\n\n".join(definitions) + "\n\n" + main)
 
 
 def compose_inverse(chain: Sequence[str], y: str) -> str:
