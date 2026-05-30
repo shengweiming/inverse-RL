@@ -48,6 +48,11 @@ def test_extract_last_json_keeps_nested_objects_intact():
     assert extract_last_json('prefix {"outer": {"inner": 1}} suffix') == {"outer": {"inner": 1}}
 
 
+def test_extract_last_json_ignores_abandoned_brace_before_final_answer():
+    text = 'scratch { ... final {"output": "ok"} trailing prose'
+    assert extract_last_json(text) == {"output": "ok"}
+
+
 def test_missing_or_non_string_inverse_input_scores_zero():
     problem = {"chain": ["reverse"], "output": "cba"}
     assert inverse_reward('{"output": "abc"}', problem) == 0.0
