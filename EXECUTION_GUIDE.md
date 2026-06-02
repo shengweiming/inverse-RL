@@ -90,33 +90,87 @@ prints `1.0 1.0`.
 
 > **Paste to Codex:**
 >
-> Create **`inverse_tasks.py`** generating JSONL problem sets, reusing the original repo’s
-> code-construction style (concatenate used function sources, then
-> `def main_solution(x): return <expr>` for the chain).
+> Context: read `AGENTS.md`, `INVERSE_EXPERIMENT_PLAN.md` (§4–6), and `EXECUTION_GUIDE.md`
+> first. This step **deliberately overrides** plan §4's "`{code}` = concatenated source"
+> wording. We follow the *original's Stage-2* convention: function definitions are **hidden**
+> and names are **remapped to meaningless identifiers**, so the model composes/inverts skills it
+> **internalized** in Stage 1 rather than reading visible code. Implement exactly as below.
 >
-> - `HELD_OUT = ["atbash","shift_digits","mirror_str","swap_pairs","reverse_words",
->   "positional_shift","rail_fence_2","riffle_shuffle"]`; the other 17 are `SEEN`.
-> - `make_problem(chain, task) -> dict | None`: sample `x` from the **first** skill’s sampler;
->   compute `y` via `reference_apply`; **verify** `compose_inverse(chain, y) == x` (undo in reverse
->   order using each skill’s inverse+kwargs); if it fails return None (caller resamples). Build the
->   `code` string and render the matching prompt. Return dict with keys: `task` ("forward"|"inverse"),
->   `chain`, `level`, `input`, `output`, `code`, `prompt`, `skills_seen` (all chain skills in SEEN),
->   and the canonical answer string for RFT/SFT targets.
-> - Generators:
->   - `gen_forward(n, levels, skills_pool)` — forward problems; used for Stage-1 (`levels=[1]`, all
->     skills), composition-control train (`levels=[2]`, SEEN), and forward eval (`levels=[1,2,3,4]`).
->   - `gen_inverse(n, levels, skills_pool)` — inverse problems; train (`levels=[1]`, SEEN; optional
->     `[1,2]`) and eval (`levels=[1,2,3,4]`, ALL).
->   - `gen_eval(n_per_cell, task)` — levels 1..4 × {seen, held_out} cells, tagged.
-> - CLI, deterministic with `--seed`, prints per-level counts + resample reject rate, e.g.:
->   `python inverse_tasks.py --task inverse --levels 1 --n 4000 --pool seen --out data/inv_l1/train.jsonl`
-> - `tests/test_tasks.py`: every emitted problem passes the round-trip check and JSON-parses.
+> Create **`inverse_tasks.py`** generating JSONL problem sets.
 >
-> Chains length 1..4. Stage-1 forward uses single skills only.
+> **Identifier remap (decontamination).**
+> - Build a fixed `ID_MAP = {skill_name: f"func_{i}"}` from `enumerate(skills_inverse.SKILLS)`
+>   (insertion order → `func_0 … func_24`). Freeze it; do not reorder `SKILLS` afterward. Also
+>   expose the inverse map.
+> - The remap affects ONLY the rendered `code` string shown to the model. It must NOT touch the
+>   `chain` field: **`chain` always stores TRUE skill names** so `verifier.reference_apply`
+>   (Step 1) can look them up in `SKILLS`. Storing `func_N` in `chain` would break the verifier
+>   and the reward.
+>
+> **Code rendering — `render_code(chain, show_defs) -> str`:**
+> - Expression: `chain=[f1,…,fk]` ⇒ `main_solution(x) = f_k(…f_1(x))`. Render each call with
+>   **no visible parameters beyond `x`** — each skill's fixed `default_kwargs` are intrinsic to
+>   its identifier; do not expose them as call args. A 2-chain renders `func_b(func_a(x))`.
+> - `show_defs=False` — **the canonical form, used for ALL training/eval/reward prompts**
+>   (Stage-1 SFT input, Stage-1.5 baseline, Stage-2a/2b, all eval): emit ONLY
+>   `def main_solution(x):\n    return <expr>`, then apply `ID_MAP`. Nothing else — no defs, no
+>   helpers, no comments.
+> - `show_defs=True` — used **only** for Stage-1 forward rejection-sampling, so the base model
+>   can produce correct rollouts: emit a **self-contained, runnable** snippet = the transitive
+>   source the chain needs (each skill's forward `def`, with its `default_kwargs` written as
+>   signature defaults so it's callable with one arg, PLUS every module-level helper/constant/
+>   import it depends on — e.g. `_atbash_ch`, `_vig`, `_mult`, the printable-band constants,
+>   `from math import gcd`), then `def main_solution(x): return <expr>`, then apply `ID_MAP` to
+>   the 25 skill names (helpers may keep their names — decontamination only needs to bite at
+>   Stage 2, where defs are hidden).
+>
+> **Skill split.**
+> `HELD_OUT = ["atbash","shift_digits","mirror_str","swap_pairs","reverse_words",
+> "positional_shift","rail_fence_2","riffle_shuffle"]`; the other 17 are `SEEN`.
+>
+> **`make_problem(chain, task) -> dict | None`:**
+> - Sample `x` from the FIRST skill's sampler; compute `y = reference_apply(chain, x)`.
+> - **Round-trip filter (mandatory):** verify `compose_inverse(chain, y) == x` (undo in reverse
+>   order using each skill's inverse + kwargs). If it fails, return None (caller resamples).
+> - Return a dict with keys:
+>   - `task` ("forward"|"inverse"), `chain` (TRUE names), `level` (=`len(chain)`),
+>     `input` (x), `output` (y),
+>   - `code` = `render_code(chain, show_defs=False)` (hidden-def, remapped — canonical),
+>   - `prompt` = the matching `FORWARD_PROMPT`/`INVERSE_PROMPT` filled with this `code`
+>     (and `output` for inverse),
+>   - `skills_seen` (bool: all chain skills in `SEEN`),
+>   - `answer` = ground-truth final answer string (y forward / x inverse) **for reference/
+>     verification only — not a reasoning trace**; RFT/SFT completions come from rejection-sampled
+>     rollouts elsewhere, not from this field.
+>   - For **forward** problems only, also include `gen_code` = `render_code(chain, show_defs=True)`
+>     and `gen_prompt` = `FORWARD_PROMPT` filled with `gen_code` (consumed solely by Stage-1
+>     rollout collection). Omit / set `None` for inverse.
+>
+> **Generators** (deterministic with `--seed`):
+> - `gen_forward(n, levels, skills_pool)` — Stage-1 (`levels=[1]`, ALL skills, single-skill chains
+>   only), composition-control train (`levels=[2]`, `SEEN`), forward eval (`levels=[1,2,3,4]`).
+> - `gen_inverse(n, levels, skills_pool)` — inverse train (`levels=[1]`, `SEEN`; optional `[1,2]`)
+>   and inverse eval (`levels=[1,2,3,4]`, ALL).
+> - `gen_eval(n_per_cell, task)` — levels 1..4 × {seen, held_out} cells, tagged.
+> - Chains length 1..4; Stage-1 forward uses single skills only.
+>
+> **CLI**, deterministic, prints per-level counts + resample reject rate, e.g.:
+> `python inverse_tasks.py --task inverse --levels 1 --n 4000 --pool seen --out data/inv_l1/train.jsonl --seed 0`
+>
+> **`tests/test_tasks.py`:** every emitted problem (i) passes the round-trip check, (ii) JSON-parses,
+> (iii) its `code` contains NO skill source and NO real skill names — only `func_N` identifiers and
+> `main_solution` (assert hidden-def form), and (iv) `chain` contains only TRUE skill names present in
+> `SKILLS`. For a forward problem, `exec` its `gen_code` in a fresh namespace and assert
+> `main_solution(input) == output` (validates the defs-shown snippet is self-contained). This is the
+> one place `exec` is allowed, and only on OUR OWN trusted rendered reference code — never on model
+> output, and never via an external sandbox.
+>
+> Do not modify `skills_inverse.py`. Plain importable modules (no install).
 
 **[CHECK]** `python inverse_tasks.py --task inverse --levels 1 2 --n 40 --pool seen --out /tmp/x.jsonl --seed 0`
-then `head -1 /tmp/x.jsonl | python -m json.tool`. `pytest -q tests/test_tasks.py` passes; reject rate
-plausible (<~15%).
+then `head -1 /tmp/x.jsonl | python -m json.tool`: confirm `code` is
+`def main_solution(x): return func_…(…)` with NO defs and NO real skill names. `pytest -q tests/test_tasks.py`
+passes; reject rate plausible (<~15%).
 
 ---
 
@@ -156,59 +210,73 @@ on the base model (low numbers fine).
 
 ## Step 4 — [CODEX] Stage 1 forward RFT  →  Stage 1.5 inverse baseline
 
-> **Paste to Codex:**
->
-> Fill **Cell 4 (Stage 1 RFT)** and **Cell 5 (Stage 1.5 baseline)**.
->
-> **Cell 4 — Stage 1 forward RFT.** If `ckpts/stage1_rft` exists, load & skip. Else: (a) rollout
-> `CFG.rollout_k` (e.g. 4) samples per `fwd_l1` problem from the base model via vLLM; keep those with
-> `forward_reward==1.0`; (b) build SFT dataset (prompt, correct_completion); (c) LoRA-SFT with TRL
-> `SFTTrainer` (rank `CFG.lora_r`, 1–2 epochs, bf16, grad-checkpointing); (d) merge adapter, save
-> merged model to `ckpts/stage1_rft` (the Stage-2 base). Log SFT loss to wandb project `inverse-rl`,
-> run `stage1-rft`. Compute & save **forward accuracy per skill & tier** to
-> `results/stage1_forward.csv`. Print **Gate G1**: PASS if mean ≥0.90 and every tier ≥0.75, else WARN
-> with offending skills.
->
-> **Cell 5 — Stage 1.5 inverse baseline.** Load `ckpts/stage1_rft`. `eval_task(task="inverse")` on the
-> level-1 eval cells (seen+held_out), pass@1 and pass@k. Save `results/stage1p5_inverse.csv`. Print
-> **Gate G2**: PASS (good for us) if inverse pass@1 is low, esp. T2–T3; if already high, warn that the
-> reversal-curse contrast is weak and suggest restricting to T2–T3.
+Paste to Codex:
+Fill Cell 4 (Stage 1 RFT) and Cell 5 (Stage 1.5 baseline).
+Decontamination invariant for this whole project: gen_prompt (function definitions SHOWN) is
+used in exactly one place — the Stage-1 forward rejection sampling below. Everywhere else
+(the Stage-1 SFT input, Stage-1.5, both Stage-2 arms, all eval) uses the hidden-def prompt.
+Cell 4 — Stage 1 forward RFT. If ckpts/stage1_rft exists, load & skip. Else:
+(a) rollout CFG.rollout_k (e.g. 4) samples per fwd_l1 problem from the base model via vLLM,
+prompting with each problem's gen_prompt (defs shown) so the untrained base model can
+actually produce correct outputs; score with forward_reward (it reads chain+output, so
+it is unaffected by which prompt produced the completion) and keep completions with
+forward_reward == 1.0.
+(b) build the SFT dataset by pairing each kept completion with that problem's hidden-def
+prompt (NOT gen_prompt) — this strip-the-defs step is what forces the model to
+internalize func_N → behavior rather than read it off the code.
+(c) LoRA-SFT with TRL SFTTrainer (rank CFG.lora_r, 1–2 epochs, bf16, grad-checkpointing);
+(d) merge adapter, save merged model to ckpts/stage1_rft (the Stage-2 base). Log SFT loss to
+wandb project inverse-rl, run stage1-rft. Compute & save forward accuracy per skill &
+tier to results/stage1_forward.csv, evaluated on the hidden-def forward eval set.
+Print Gate G1: PASS if mean ≥ 0.90 and every tier ≥ 0.75, else WARN with offending
+skills.
+Cell 5 — Stage 1.5 inverse baseline. Load ckpts/stage1_rft. eval_task(task="inverse") on
+the level-1 eval cells (seen+held_out), pass@1 and pass@k, using the hidden-def prompt (the
+model must invert the forward function it internalized in Stage 1; never show defs here). Save
+results/stage1p5_inverse.csv. Print Gate G2: PASS (good for us) if inverse pass@1 is low,
+esp. T2–T3; if already high, warn that the reversal-curse contrast is weak and suggest restricting
+to T2–T3.
 
-**[CHECK]** On **A100** with **3B** + real data: G1 should PASS (forward learned); G2 should show
-**low** inverse accuracy despite high forward — that gap is the premise. If G1 fails on some T3 skills,
-drop them (don’t switch models).
+[CHECK] On A100 with 3B + real data: G1 should PASS (forward learned); G2 should show
+low inverse accuracy despite high forward — that gap is the premise. If G1 fails on some T3 skills,
+drop them (don't switch models). Watch for the opposite failure on G2: if hidden-def inverse pass@k is
+identically zero even at k≈8 on T2–T3, GRPO will have no reward variance to learn from in Step 6 —
+that is the trigger to fall back to "show source" for the inversion arm only (option 2).
 
 ---
-
 ## Step 5 — [CODEX] Stage 2a: COMPOSITION CONTROL (positive control + gate)
 
-> **Paste to Codex:**
->
-> Build **Cell 6**, a **parametrized** Stage-2 trainer used for *both* operations, then invoke it for
-> the composition control. Two functions:
->
-> - `run_grpo(task, train_jsonl, train_levels, run_name, out_dir)`: base = merged `ckpts/stage1_rft`;
->   train a **fresh LoRA** with TRL `GRPOTrainer`; reward = `verifier.batch_forward_reward` if
->   `task=="forward"` else `batch_inverse_reward` (pass per-prompt `problem` dicts via dataset columns
->   / closure so the reward can recover each `chain`/`output`). GRPO config: `num_generations=CFG.G`,
->   `max_completion_length=CFG.max_completion_len`, `use_vllm=True`, bf16, grad-checkpointing,
->   `learning_rate=CFG.lr`, default KL/beta, `per_device_train_batch_size` tuned to fit A100-40GB,
->   `max_steps`, `save_steps=25`. **Drive checkpointing:** `output_dir` under `out_dir` on Drive +
->   `resume_from_checkpoint=True` so a Colab restart resumes from the latest Drive checkpoint. wandb:
->   `report_to="wandb"`, log reward mean/std, frac-correct, KL, completion length; add periodic eval
->   logging `eval/{task}_pass@1/{seen,held_out}` per eval level. On finish: merge, save to
->   `out_dir/final`. Idempotent: skip if `final` exists, resume if a checkpoint exists, else fresh.
-> - `run_rft(task, train_jsonl, train_levels, run_name, out_dir)`: rollout `CFG.rft_k` samples per
->   train problem from `ckpts/stage1_rft`, keep reward==1.0, LoRA-SFT on (prompt, correct_completion),
->   merge, save. Match #SFT examples to the RL arm’s seen-correct count where feasible (report both).
->
-> **Invoke for the composition control:** `run_grpo("forward", "data/fwd_l2_seen", [2],
-> "comp-rl", "ckpts/comp_rl")` and `run_rft("forward", "data/fwd_l2_seen", [2], "comp-rft",
-> "ckpts/comp_rft")`. Then eval both on forward levels 1–4 (seen+held_out) and save to `results/`.
+Paste to Codex:
+Build Cell 6, a parametrized Stage-2 trainer used for both operations, then invoke it for
+the composition control. Two functions:
+Decontamination invariant: both functions below generate rollouts from the dataset's hidden-def
+prompt; never gen_prompt. By the Stage-1 checkpoint the model has internalized the skills, so
+all of Stage 2 runs defs-hidden — this is exactly what makes the composition control a faithful
+replication of the original (and what makes Gate G0 a real positive control).
 
-**[CHECK]** First a **20-step smoke run** (`max_steps=20`, `G=4`): reward nonzero & trending up, wandb
-logging, a Drive checkpoint appears; kill the runtime mid-run and re-run → it **resumes** from Drive.
-Then the real comp runs (~250 steps). **Gate G0:** comp-RL should beat comp-RFT on levels 3–4. If not,
+run_grpo(task, train_jsonl, train_levels, run_name, out_dir): base = merged ckpts/stage1_rft;
+train a fresh LoRA with TRL GRPOTrainer; reward = verifier.batch_forward_reward if
+task=="forward" else batch_inverse_reward (pass per-prompt problem dicts via dataset columns
+/ closure so the reward can recover each chain/output; recall chain holds TRUE skill names).
+GRPO config: num_generations=CFG.G, max_completion_length=CFG.max_completion_len,
+use_vllm=True, bf16, grad-checkpointing, learning_rate=CFG.lr, default KL/beta,
+per_device_train_batch_size tuned to fit A100-40GB, max_steps, save_steps=25. Drive
+checkpointing: output_dir under out_dir on Drive + resume_from_checkpoint=True so a Colab
+restart resumes from the latest Drive checkpoint. wandb: report_to="wandb", log reward mean/std,
+frac-correct, KL, completion length; add periodic eval logging eval/{task}_pass@1/{seen,held_out}
+per eval level (eval uses the hidden-def prompt). On finish: merge, save to out_dir/final.
+Idempotent: skip if final exists, resume if a checkpoint exists, else fresh.
+run_rft(task, train_jsonl, train_levels, run_name, out_dir): rollout CFG.rft_k samples per
+train problem from ckpts/stage1_rft using the hidden-def prompt (NOT gen_prompt, even for
+forward composition problems that happen to carry one), keep reward==1.0, LoRA-SFT on
+(hidden-def prompt, correct_completion), merge, save. Match #SFT examples to the RL arm's
+seen-correct count where feasible (report both).
+
+Invoke for the composition control: run_grpo("forward", "data/fwd_l2_seen", [2], "comp-rl", "ckpts/comp_rl") and run_rft("forward", "data/fwd_l2_seen", [2], "comp-rft", "ckpts/comp_rft"). Then eval both on forward levels 1–4 (seen+held_out) and save to results/.
+
+[CHECK] First a 20-step smoke run (max_steps=20, G=4): reward nonzero & trending up, wandb
+logging, a Drive checkpoint appears; kill the runtime mid-run and re-run → it resumes from Drive.
+Then the real comp runs (~250 steps). Gate G0: comp-RL should beat comp-RFT on levels 3–4. If not,
 the setup is underpowered → raise steps or revisit before inversion (an inversion null would otherwise
 be uninterpretable).
 

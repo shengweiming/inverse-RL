@@ -68,7 +68,7 @@ def _expression(chain: Sequence[str]) -> str:
     return expr
 
 
-def render_code(chain: Sequence[str], show_defs: bool = False) -> str:
+def render_code(chain: Sequence[str], show_defs: bool = True) -> str:
     """Render a ``main_solution`` snippet for a true-name skill chain.
 
     Hidden-definition snippets (``show_defs=False``) expose only the composed
@@ -120,7 +120,7 @@ def make_problem(chain: Sequence[str], task: Task) -> dict[str, Any] | None:
     if compose_inverse(chain, y) != x:
         return None
 
-    code = render_code(chain, show_defs=False)
+    code = render_code(chain)
     prompt = (
         FORWARD_PROMPT.format(code=code, input=x)
         if task == "forward"

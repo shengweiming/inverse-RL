@@ -112,6 +112,7 @@ def test_inverse_omits_generation_prompt_fields():
     assert problem is not None
     assert problem["gen_code"] is None
     assert problem["gen_prompt"] is None
+    assert "def func_16" in problem["code"]
 
 
 def test_eval_generation_tags_seen_and_held_out_cells():
