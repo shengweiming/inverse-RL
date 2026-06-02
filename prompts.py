@@ -6,15 +6,22 @@ import json
 from typing import Any
 
 
-FORWARD_PROMPT = '''Given the following code:
+FORWARD_PROMPT = '''You are given a code:
+
 {code}
 
-Predict main_solution("{input}"). Reason without running code. Answer JSON {{"output": ...}}.'''
+Can you predict the output of `main_solution("{input}")` without writing any code?
+Please reason and put your final answer in the following json format:
+{{"output": <your output>}}, where <your output> should be the final string.'''
 
-INVERSE_PROMPT = '''Given the following code:
+INVERSE_PROMPT = '''You are given a code:
+
 {code}
 
-main_solution(x) returned "{output}". Find an input x reproducing that output exactly. Reason without running code. Answer JSON {{"input": ...}}.'''
+The call `main_solution(x)` returned "{output}".
+Can you find an input x such that `main_solution(x)` returns exactly "{output}",
+without writing any code? Please reason and put your final answer in the following
+json format: {{"input": <x>}}, where <x> should be the input string.'''
 
 
 def extract_last_json(text: str) -> dict[str, Any] | None:
