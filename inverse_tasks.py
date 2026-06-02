@@ -1,10 +1,9 @@
 """Deterministic JSONL task generation for inverse-RL experiments.
 
 The generated ``chain`` always stores true ``skills_inverse.SKILLS`` names for
-trusted verification. The canonical rendered code shown to the model hides atomic
-function definitions and includes only ``main_solution`` over meaningless
-``func_N`` identifiers. Stage-1 rejection sampling can separately render the
-minimal forward definitions needed for a chain.
+trusted verification. The canonical rendered code shown to the model includes
+the concatenated atomic forward definitions needed for the chain plus
+``main_solution`` over meaningless ``func_N`` identifiers.
 """
 
 from __future__ import annotations
@@ -68,14 +67,17 @@ def _expression(chain: Sequence[str]) -> str:
     return expr
 
 
-def render_code(chain: Sequence[str], show_defs: bool = False) -> str:
+def render_code(chain: Sequence[str], show_defs: bool = True) -> str:
     """Render a ``main_solution`` snippet for a true-name skill chain.
 
-    Hidden-definition snippets (``show_defs=False``) expose only the composed
-    ``main_solution`` expression over decontaminated ``func_N`` identifiers.
-    Stage-1 rejection sampling snippets (``show_defs=True``) add just the
-    forward definitions and explicit module-level dependencies needed by this
-    chain, never the whole helper preamble.
+    By default, snippets expose the concatenated atomic forward definitions
+    used by the chain plus the composed ``main_solution`` expression, matching
+    the experiment spec's train/eval prompt surface. Set ``show_defs=False``
+    only for diagnostics that need the decontaminated ``main_solution`` stub.
+
+    Definition-bearing snippets add just the forward definitions and explicit
+    module-level dependencies needed by this chain, never the whole helper
+    preamble.
     """
     _validate_chain(chain)
     main = f"def main_solution(x):\n    return {_expression(chain)}"
@@ -120,7 +122,7 @@ def make_problem(chain: Sequence[str], task: Task) -> dict[str, Any] | None:
     if compose_inverse(chain, y) != x:
         return None
 
-    code = render_code(chain, show_defs=False)
+    code = render_code(chain)
     prompt = (
         FORWARD_PROMPT.format(code=code, input=x)
         if task == "forward"
