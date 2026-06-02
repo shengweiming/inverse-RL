@@ -1,9 +1,9 @@
 """Deterministic JSONL task generation for inverse-RL experiments.
 
 The generated ``chain`` always stores true ``skills_inverse.SKILLS`` names for
-trusted verification. The rendered code shown to the model includes the atomic
-function definitions and ``main_solution`` while decontaminating true skill names
-into meaningless ``func_N`` identifiers.
+trusted verification. The canonical rendered code shown to the model includes
+the concatenated atomic forward definitions needed for the chain plus
+``main_solution`` over meaningless ``func_N`` identifiers.
 """
 
 from __future__ import annotations
@@ -44,49 +44,20 @@ HELD_OUT: list[str] = [
 SEEN: list[str] = [name for name in SKILLS if name not in HELD_OUT]
 ALL_SKILLS: list[str] = list(SKILLS)
 
-_HELPER_PREAMBLE = '''from math import gcd
-
-_LO, _HI = 32, 126
-_SPAN = _HI - _LO + 1
-
-def _helper_0(c):
-    if 'a' <= c <= 'z':
-        return chr(ord('z') - (ord(c) - ord('a')))
-    if 'A' <= c <= 'Z':
-        return chr(ord('Z') - (ord(c) - ord('A')))
-    return c
-
-def _helper_1(L):
-    m = 3
-    while gcd(m, L) != 1:
-        m += 2
-    return m
-
-def _helper_2(s, key, sign):
-    out = []
-    j = 0
-    for c in s:
-        if 'a' <= c <= 'z':
-            k = (ord(key[j % len(key)]) - 97) * sign
-            out.append(chr((ord(c) - 97 + k) % 26 + 97))
-            j += 1
-        else:
-            out.append(c)
-    return ''.join(out)
-'''
-
-
-HELPER_ID_MAP: dict[str, str] = {"_atbash_ch": "_helper_0", "_mult": "_helper_1", "_vig": "_helper_2"}
-
-
 def _replace_render_names(source: str) -> str:
-    """Replace true skill/helper identifiers with decontaminated render names."""
-    for true_name, render_name in HELPER_ID_MAP.items():
-        source = re.sub(rf"\b{re.escape(true_name)}\b", render_name, source)
+    """Replace true skill identifiers with stable decontaminated render names."""
     if not ID_MAP:
         return source
     pattern = re.compile(r"\b(" + "|".join(re.escape(name) for name in sorted(ID_MAP, key=len, reverse=True)) + r")\b")
     return pattern.sub(lambda match: ID_MAP[match.group(1)], source)
+
+
+DEPENDENCY_SOURCE: dict[str, tuple[str, ...]] = {
+    "atbash": (inspect.getsource(skills_inverse._atbash_ch).strip(),),
+    "vigenere": (inspect.getsource(skills_inverse._vig).strip(),),
+    "succ_char": ("_LO,_HI = 32,126; _SPAN=_HI-_LO+1",),
+    "deterministic_shuffle": ("from math import gcd", inspect.getsource(skills_inverse._mult).strip()),
+}
 
 
 def _expression(chain: Sequence[str]) -> str:
@@ -96,21 +67,36 @@ def _expression(chain: Sequence[str]) -> str:
     return expr
 
 
-def render_code(chain: Sequence[str], show_defs: bool = False) -> str:
+def render_code(chain: Sequence[str], show_defs: bool = True) -> str:
     """Render a ``main_solution`` snippet for a true-name skill chain.
 
-    All rendered snippets include the atomic function definitions used by the
-    chain plus ``main_solution``, matching the canonical task format. True
-    registry names are still decontaminated to stable ``func_N`` identifiers;
-    ``show_defs`` is retained for compatibility with earlier callers.
+    By default, snippets expose the concatenated atomic forward definitions
+    used by the chain plus the composed ``main_solution`` expression, matching
+    the experiment spec's train/eval prompt surface. Set ``show_defs=False``
+    only for diagnostics that need the decontaminated ``main_solution`` stub.
+
+    Definition-bearing snippets add just the forward definitions and explicit
+    module-level dependencies needed by this chain, never the whole helper
+    preamble.
     """
     _validate_chain(chain)
     main = f"def main_solution(x):\n    return {_expression(chain)}"
-    definitions: list[str] = []
+    if not show_defs:
+        return _replace_render_names(main)
+
+    blocks: list[str] = []
+    seen_blocks: set[str] = set()
     for name in dict.fromkeys(chain):
-        forward = SKILLS[name][0]
-        definitions.append(inspect.getsource(forward).strip())
-    return _replace_render_names(_HELPER_PREAMBLE.strip() + "\n\n" + "\n\n".join(definitions) + "\n\n" + main)
+        for dependency in DEPENDENCY_SOURCE.get(name, ()):
+            if dependency not in seen_blocks:
+                blocks.append(dependency)
+                seen_blocks.add(dependency)
+        forward = inspect.getsource(SKILLS[name][0]).strip()
+        if forward not in seen_blocks:
+            blocks.append(forward)
+            seen_blocks.add(forward)
+    blocks.append(main)
+    return _replace_render_names("\n\n".join(blocks))
 
 
 def compose_inverse(chain: Sequence[str], y: str) -> str:
@@ -136,7 +122,7 @@ def make_problem(chain: Sequence[str], task: Task) -> dict[str, Any] | None:
     if compose_inverse(chain, y) != x:
         return None
 
-    code = render_code(chain, show_defs=False)
+    code = render_code(chain)
     prompt = (
         FORWARD_PROMPT.format(code=code, input=x)
         if task == "forward"
