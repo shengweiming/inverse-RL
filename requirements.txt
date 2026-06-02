@@ -1,0 +1,10 @@
+transformers
+trl>=0.12
+peft
+datasets
+accelerate
+vllm
+wandb
+bitsandbytes
+pandas
+matplotlib
