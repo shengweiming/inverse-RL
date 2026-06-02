@@ -3,29 +3,33 @@ import random
 
 import pytest
 
-from inverse_tasks import ALL_SKILLS, HELD_OUT, ID_MAP, SEEN, compose_inverse, gen_eval, make_problem, render_code
+from inverse_tasks import (
+    ALL_SKILLS,
+    HELD_OUT,
+    ID_MAP,
+    SEEN,
+    compose_inverse,
+    gen_eval,
+    gen_forward,
+    gen_inverse,
+    make_problem,
+    render_code,
+)
 from skills_inverse import SKILLS
 from verifier import reference_apply
 
 
-def test_rendered_code_includes_definitions_by_default():
+def test_rendered_code_hides_definitions_by_default():
     chain = ["reverse", "shift_chars", "vigenere"]
-    code = render_code(chain)
-    assert code == render_code(chain, show_defs=True)
-    assert "def func_0" in code
-    assert "def func_4" in code
-    assert "def func_22" in code
-    assert "def _vig" in code
-    assert "def main_solution(x):\n    return func_22(func_4(func_0(x)))" in code
-    assert code.count("def main_solution") == 1
-    assert "def reverse" not in code
-    assert "def shift_chars" not in code
-    assert "def vigenere" not in code
-
-
-def test_rendered_code_can_emit_hidden_stub_for_diagnostics_only():
-    code = render_code(["reverse", "shift_chars", "vigenere"], show_defs=False)
+    code = render_code(chain, show_defs=False)
     assert code == "def main_solution(x):\n    return func_22(func_4(func_0(x)))"
+    assert code.startswith("def main_solution")
+    assert code.count("def ") == 1
+    for forbidden in ("import", "_helper", "_LO", "gcd"):
+        assert forbidden not in code
+
+
+def assert_hidden_code_stub(code):
     assert code.startswith("def main_solution")
     assert code.count("def ") == 1
     for forbidden in ("import", "_helper", "_LO", "gcd"):
@@ -44,12 +48,33 @@ def test_generated_problem_round_trips_and_uses_true_chain(task):
     assert reference_apply(problem["chain"], problem["input"]) == problem["output"]
 
     code = problem["code"]
-    assert "def func_0" in code
-    assert "def func_4" in code
-    assert "def main_solution(x):\n    return func_4(func_0(x))" in code
-    assert code in problem["prompt"]
+    assert_hidden_code_stub(code)
+    assert "func_" in code
     for name in SKILLS:
         assert f"def {name}" not in code
+
+
+def test_seeded_inverse_generation_hides_chain_definitions_in_first_record():
+    random.seed(0)
+    problems, rejects = gen_inverse(40, [1, 2], SEEN)
+    assert rejects == 2
+    first = problems[0]
+    assert first["chain"] == ["insert_separator", "swap_case"]
+    assert first["code"] == "def main_solution(x):\n    return func_1(func_17(x))"
+    assert_hidden_code_stub(first["code"])
+
+
+@pytest.mark.parametrize(
+    ("task", "generator"),
+    [("forward", gen_forward), ("inverse", gen_inverse)],
+)
+def test_generated_problem_sets_hide_chain_definitions(task, generator):
+    random.seed(0)
+    problems, rejects = generator(20, [1, 2], SEEN)
+    assert rejects >= 0
+    assert {problem["task"] for problem in problems} == {task}
+    for problem in problems:
+        assert_hidden_code_stub(problem["code"])
 
 
 def test_show_defs_for_self_contained_chain_omits_global_helpers():
@@ -61,14 +86,14 @@ def test_show_defs_for_self_contained_chain_omits_global_helpers():
         assert forbidden not in code
 
 
-def test_forward_gen_code_matches_canonical_code_and_is_executable():
+def test_forward_gen_code_is_self_contained_and_executable():
     random.seed(456)
     problem = make_problem(["atbash", "deterministic_shuffle", "vigenere", "succ_char"], "forward")
     assert problem is not None
     namespace = {}
     exec(problem["gen_code"], namespace)
     assert namespace["main_solution"](problem["input"]) == problem["output"]
-    assert problem["gen_code"] == problem["code"]
+    assert problem["gen_code"] != problem["code"]
     assert "def func_2" in problem["gen_code"]
     assert "def func_20" in problem["gen_code"]
     assert "def func_22" in problem["gen_code"]
@@ -78,7 +103,7 @@ def test_forward_gen_code_matches_canonical_code_and_is_executable():
     assert "def _vig" in problem["gen_code"]
     assert "from math import gcd" in problem["gen_code"]
     assert "_LO" in problem["gen_code"]
-    assert problem["gen_prompt"] == problem["prompt"]
+    assert problem["gen_prompt"] is not None
 
 
 def test_inverse_omits_generation_prompt_fields():
@@ -98,8 +123,7 @@ def test_eval_generation_tags_seen_and_held_out_cells():
     cells = {(p["level"], p["eval_split"]) for p in problems}
     assert cells == {(level, split) for level in range(1, 5) for split in ("seen", "held_out")}
     for problem in problems:
-        assert "def main_solution" in problem["code"]
-        assert "def func_" in problem["code"]
+        assert_hidden_code_stub(problem["code"])
         if problem["eval_split"] == "seen":
             assert set(problem["chain"]).issubset(SEEN)
             assert problem["skills_seen"] is True
