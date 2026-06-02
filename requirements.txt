@@ -1,0 +1,11 @@
+# Colab GPU install order:
+# 1. Colab Cell 0: install vLLM with `pip install uv && uv pip install --system vllm --torch-backend=cu128` (brings torch + vLLM matched to CUDA 12.8), then restart the runtime.
+# 2. `pip install -r requirements.txt` (the rest of the GPU stack).
+# Codespace: `pip install -r requirements-dev.txt`.
+# Do not list torch or vLLM here: their CUDA-compatible wheels are installed separately above.
+# Lock exact versions by running `pip freeze` on a working Colab session and pasting the resolved versions here once the stack imports cleanly.
+trl>=0.12,<1
+peft>=0.13,<1
+datasets>=2.20,<5
+accelerate>=0.34,<2
+wandb>=0.17,<1
