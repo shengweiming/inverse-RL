@@ -167,7 +167,7 @@ prints `1.0 1.0`.
 >
 > Do not modify `skills_inverse.py`. Plain importable modules (no install).
 
-**[CHECK]** `python inverse_tasks.py --task inverse --levels 1 2 --n 40 --pool seen --out /tmp/x.jsonl --seed 0`
+**[CHECK]** `python inverse_tasks.py --task inverse --levels 1,2 --n 40 --pool seen --out /tmp/x.jsonl --seed 0`
 then `head -1 /tmp/x.jsonl | python -m json.tool`: confirm `code` is
 `def main_solution(x): return func_…(…)` with NO defs and NO real skill names. `pytest -q tests/test_tasks.py`
 passes; reject rate plausible (<~15%).
