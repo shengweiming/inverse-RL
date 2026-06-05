@@ -208,40 +208,50 @@ on the base model (low numbers fine).
 
 ---
 
-## Step 4 — [CODEX] Stage 1 forward RFT  →  Stage 1.5 inverse baseline
+## Step 4 — [CODEX] Stage 1 forward RFT → Stage 1.5 inverse baseline
 
-Paste to Codex:
-Fill Cell 4 (Stage 1 RFT) and Cell 5 (Stage 1.5 baseline).
-Decontamination invariant for this whole project: gen_prompt (function definitions SHOWN) is
-used in exactly one place — the Stage-1 forward rejection sampling below. Everywhere else
-(the Stage-1 SFT input, Stage-1.5, both Stage-2 arms, all eval) uses the hidden-def prompt.
-Cell 4 — Stage 1 forward RFT. If ckpts/stage1_rft exists, load & skip. Else:
-(a) rollout CFG.rollout_k (e.g. 4) samples per fwd_l1 problem from the base model via vLLM,
-prompting with each problem's gen_prompt (defs shown) so the untrained base model can
-actually produce correct outputs; score with forward_reward (it reads chain+output, so
-it is unaffected by which prompt produced the completion) and keep completions with
-forward_reward == 1.0.
-(b) build the SFT dataset by pairing each kept completion with that problem's hidden-def
-prompt (NOT gen_prompt) — this strip-the-defs step is what forces the model to
-internalize func_N → behavior rather than read it off the code.
-(c) LoRA-SFT with TRL SFTTrainer (rank CFG.lora_r, 1–2 epochs, bf16, grad-checkpointing);
-(d) merge adapter, save merged model to ckpts/stage1_rft (the Stage-2 base). Log SFT loss to
-wandb project inverse-rl, run stage1-rft. Compute & save forward accuracy per skill &
-tier to results/stage1_forward.csv, evaluated on the hidden-def forward eval set.
-Print Gate G1: PASS if mean ≥ 0.90 and every tier ≥ 0.75, else WARN with offending
-skills.
-Cell 5 — Stage 1.5 inverse baseline. Load ckpts/stage1_rft. eval_task(task="inverse") on
-the level-1 eval cells (seen+held_out), pass@1 and pass@k, using the hidden-def prompt (the
-model must invert the forward function it internalized in Stage 1; never show defs here). Save
-results/stage1p5_inverse.csv. Print Gate G2: PASS (good for us) if inverse pass@1 is low,
-esp. T2–T3; if already high, warn that the reversal-curse contrast is weak and suggest restricting
-to T2–T3.
+**Paste to Codex:**
 
-[CHECK] On A100 with 3B + real data: G1 should PASS (forward learned); G2 should show
-low inverse accuracy despite high forward — that gap is the premise. If G1 fails on some T3 skills,
-drop them (don't switch models). Watch for the opposite failure on G2: if hidden-def inverse pass@k is
-identically zero even at k≈8 on T2–T3, GRPO will have no reward variance to learn from in Step 6 —
-that is the trigger to fall back to "show source" for the inversion arm only (option 2).
+Context: read `AGENTS.md`, `INVERSE_EXPERIMENT_PLAN.md` (§7), and `EXECUTION_GUIDE.md` first. Implement **Cell 4** (Stage 1 forward RFT) and **Cell 5** (Stage 1.5 inverse baseline) in `notebooks/inverse_rl_colab.ipynb`, replacing the existing labeled stubs. Implement only these two cells; do not scaffold cells 6–8.
+
+**Config additions (Cell 1).** Add these keys to the `CFG` dict if absent; do not rename existing keys:
+- `rollout_k = 4` — samples per Stage-1 forward problem during rejection sampling.
+- `rft_k = 4` — samples per problem for the Stage-2 RFT arms (added now so the two RFT steps share one knob; Step 5 will consume it).
+- `sft_epochs = 1` — Stage-1 SFT epochs; raise to 2 only if Gate G1 misses.
+- `g2_pass1_threshold = 0.30` — Gate-G2 soft ceiling on T2–T3 level-1 inverse pass@1.
+
+**Decontamination invariant (whole project).** `gen_prompt` (function definitions SHOWN) is used in **exactly one place** — the Stage-1 forward rejection sampling in Cell 4(a) below. Everywhere else — the Stage-1 SFT *input*, Stage 1.5, both Stage-2 arms, and all eval — uses the hidden-def `prompt` field. Each problem dict already carries both `prompt` (hidden-def, canonical) and, for forward problems only, `gen_prompt` (defs-shown). Read them off the dict; never re-render.
+
+---
+
+**Cell 4 — Stage 1 forward RFT.** If `ckpts/stage1_rft/` (the merged model) exists, load & skip. Else:
+
+**(a) Rollout (defs SHOWN).** Read `data/fwd_l1_all.jsonl`. For each problem, generate `CFG.rollout_k` samples from the **base** model (`CFG.model_name`) via the existing `generate(...)` helper, prompting with that problem's **`gen_prompt`** (definitions shown) so the untrained base can produce correct outputs. Generation returns completions index-aligned to the input prompts — preserve that alignment so each completion maps back to its source problem. Score every sample with `verifier.forward_reward(sample, problem)` (it reads `chain` + `output`, so it is **unaffected** by which prompt produced the completion). Keep only samples scoring `1.0`.
+
+**(b) Build SFT data (defs HIDDEN — the decontamination step).** Pair each kept completion with that **same problem's `prompt`** field (hidden-def), **not** its `gen_prompt`. Stripping the defs here is what forces the model to internalize `func_N → behavior` rather than read it off the code. Build the SFT dataset as `(hidden_def_prompt, kept_completion)` pairs.
+
+**(c) RFT data documentation (REQUIRED — I want to inspect this).** Before training, persist the rejection-sampled dataset and a summary so the RFT corpus is auditable:
+- Write **`results/stage1_rft_data.jsonl`**, one row per kept SFT example with fields: `chain`, `level`, `tier` (`SKILLS[chain[0]][4]`), `skill` (`chain[0]`), `input`, `output`, `prompt` (the hidden-def prompt actually used for SFT), `completion` (the kept rollout text), and `source_prompt` (set to `"gen_prompt"` for provenance).
+- Write **`results/stage1_rft_stats.csv`** aggregated per skill & tier with columns: `skill`, `tier`, `n_problems` (problems attempted), `n_kept` (correct completions kept), `n_problems_with_any_kept` (problems with ≥1 correct sample), `keep_rate` (`n_kept / (n_problems * rollout_k)`), `coverage` (`n_problems_with_any_kept / n_problems`). 
+- Print a short table of per-tier `keep_rate` and `coverage`, plus the total kept-example count, so a low-yield skill is visible before we spend the SFT/A100 time. Also log `n_kept` and these per-tier rates to wandb as run config/summary.
+
+**(d) Train.** LoRA-SFT with TRL `SFTTrainer` (rank `CFG.lora_r`, `CFG.sft_epochs` epochs, bf16, gradient checkpointing). Log SFT loss to **wandb** project `inverse-rl`, run name `stage1-rft`.
+
+**(e) Merge & save.** Merge the adapter and save the merged model to `ckpts/stage1_rft/` (this becomes the Stage-2 base). Set the appropriate `state.json` flag.
+
+**(f) Gate G1.** Compute forward accuracy per skill & tier on **level-1** forward eval problems via the existing `forward_accuracy(model, out_name="stage1_forward.csv")` helper (it defaults to `data/fwd_l1to4_eval.jsonl` filtered to level 1, and joins tier from `SKILLS`). This writes **`results/stage1_forward.csv`**. Then print **Gate G1: PASS iff mean accuracy ≥ 0.90 AND every tier mean ≥ 0.75**; otherwise print **WARN** and list the offending skills/tiers.
+
+---
+
+**Cell 5 — Stage 1.5 inverse baseline (reversal-curse gate).** Load `ckpts/stage1_rft/`. Run the existing `eval_task(model, cells=DATA_DIR/"inv_l1to4_eval.jsonl", task="inverse", k=CFG.pass_at_k, out_name="stage1p5_inverse.csv")` **restricted to level-1 cells** (seen + held_out), reporting pass@1 and pass@k. This uses the hidden-def `prompt` (the model must invert the forward function it internalized in Stage 1 — never show defs here). Saves **`results/stage1p5_inverse.csv`**.
+
+Compute the T2–T3 level-1 inverse pass@1 (join tier from `SKILLS[chain[0]]`; for level-1 cells the chain is a single skill). Print **Gate G2: PASS (good for us) iff T2–T3 level-1 inverse pass@1 < `CFG.g2_pass1_threshold`** — i.e. inverse is *not already there* despite high forward. If it is already high, **WARN** that the reversal-curse contrast is weak and suggest restricting the headline to T2–T3.
+
+Idempotent throughout: check Drive for each output → load & skip if present; else compute → save → set state. Print a one-line `[skip]`/`[run]` banner per cell.
+
+**[CHECK]** On A100 with 3B + real data: **G1 should PASS** (forward learned) and **G2 should show low inverse** despite high forward — that gap is the experimental premise. Inspect `results/stage1_rft_data.jsonl` and `results/stage1_rft_stats.csv` to confirm the kept corpus looks sane (every skill has nonzero coverage; per-tier keep rates plausible). Failure handling:
+- If **G1 fails on some T3 skills**, drop those skills (don't switch models).
+- If **hidden-def inverse pass@k is identically zero even at k≈8 on T2–T3**, GRPO will have no reward variance to learn from in Step 6 — that is the trigger to fall back to "show source" for the inversion arm only (option 2), **not** a model switch.
 
 ---
 ## Step 5 — [CODEX] Stage 2a: COMPOSITION CONTROL (positive control + gate)
