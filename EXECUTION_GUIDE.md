@@ -78,15 +78,34 @@ Also mine the archived detail CSV (free coverage preview): per-skill pass@8 and
 trainable fraction (problems with 0 < successes < 8). Then re-run Cell 5 on the
 regenerated eval set (one vLLM pass; L4 OK) for the post-swap G2 record.
 
-## Step 6 — [AGENT] Coverage probe (build) → [YOU] run (~1 L4-hour)
+## Step 6 — [AGENT] Coverage probe (built ✅) → [YOU] run (~1 L4-hour)
 
-New notebook cell or `scripts/coverage_probe.py`: load `ckpts/stage1_sft`,
-sample **16 rollouts at temperature 1.0** over ~500 problems from the
-regenerated `inv_l1_seen_train.jsonl`, score with `verifier.inverse_reward`,
-write `results/coverage_probe.csv` with per-problem success counts plus a
-per-skill summary: pass@16, **trainable fraction** (0 < c < 16), mean/95p
-completion tokens. Resumable (skip if CSV exists); reuse Cell-3 `generate()`.
-Acceptance: runs on L4; prints the G3 decision inputs.
+Built as `scripts/coverage_probe.py` — a standalone vLLM loader, NOT a
+notebook cell (keeps the CLAUDE.md cell-index map valid; as a subprocess it
+also returns all VRAM on exit, sidestepping gotchas 3–4). It samples **16
+rollouts at temperature 1.0** (top_p 1.0 — the GRPO rollout distribution, not
+Cell-3's eval recipe) over 500 problems from the regenerated
+`inv_l1_seen_train.jsonl`, scores with `verifier.inverse_reward`, writes
+`results/coverage_probe.csv` (one row per problem: skill, success_count/16,
+mean & p95 completion tokens) and prints the per-skill G3 decision inputs:
+pass@16 and **trainable fraction** (0 < c < 16). Stale-data guards hard-fail
+before any generation: `DATA_CONTRACT.txt` next to the data file must read
+`v4-heldout-duplicate`, and the file's skill census must be exactly the v4
+SEEN set. Resumable: skips entirely if the CSV exists (delete/archive to
+re-run); checkpoints partial progress to `coverage_probe.partial.csv` every
+100 problems and resumes from it after a session death.
+
+Run after Cells 0–3 on L4. The script needs the **merged** Stage-1 checkpoint
+(it refuses a bare LoRA adapter dir); Cell-3 `load_model` produces and caches
+the merge:
+
+```python
+ckpt = load_model(CFG["model_name"], CKPT_DIR / "stage1_sft")["model_path"]
+!python scripts/coverage_probe.py --ckpt {ckpt} --data {DATA_DIR}/inv_l1_seen_train.jsonl --out {RESULTS_DIR}/coverage_probe.csv --gpu-mem-util 0.85
+```
+
+(Per gotcha 2, copying the merged checkpoint to `/content/` first makes the
+vLLM load much faster.) Acceptance: runs on L4; prints the G3 decision inputs.
 
 ## Step 7 — [YOU] Gate G3 decision (minutes)
 

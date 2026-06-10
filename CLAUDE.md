@@ -18,7 +18,7 @@ skills. Models answer in JSON; nothing ever executes model output.
 
 ```bash
 pip install -r requirements-dev.txt --break-system-packages  # CPU dev deps
-python3 -m pytest -q                  # 57 tests, all green, <1s, no GPU
+python3 -m pytest -q                  # 72 tests, all green, <1s, no GPU
 python3 skills_inverse.py             # registry self-test, must print ALL GOOD
 python3 inverse_tasks.py --task inverse --levels 1,2 --n 40 \
     --pool seen --out /tmp/x.jsonl --seed 0   # CLI smoke; expect "rejects: 0"
@@ -91,8 +91,11 @@ Cell 4 = index 6, Cell 5 = index 7, stubs at 8–10.
 
 ## Current state & next tasks
 
-Done: Gates G1, G2 (numbers in plan §4–5). Pending split swap to
-`HELD_OUT = [rotate_str, mirror_str, fancy_brackets]` (EXECUTION_GUIDE Step 5,
-human task). Agent tasks queued, in order: coverage probe (Step 6), Cell 7 GRPO
-arm (Step 8), Cell 6 iterative-RFT arm (Step 9), analysis (Step 10). Specs for
-each are in the guide; hypotheses and gate criteria in the plan.
+Done: Gates G1, G2 (numbers in plan §4–5); split swap (code/notebook are on
+`DATA_CONTRACT v4-heldout-duplicate`, `HELD_OUT = [rotate_str, mirror_str,
+duplicate_every_char]` — note plan §3 / EXECUTION_GUIDE Step 5 still describe
+the v3 split and need a human doc pass); coverage probe built
+(`scripts/coverage_probe.py`, Step 6 — Colab run on L4 pending). Agent tasks
+queued, in order: Cell 7 GRPO arm (Step 8), Cell 6 iterative-RFT arm (Step 9),
+analysis (Step 10). Specs for each are in the guide; hypotheses and gate
+criteria in the plan.
