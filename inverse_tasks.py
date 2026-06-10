@@ -58,7 +58,7 @@ ID_MAP_INV: dict[str, str] = {identifier: name for name, identifier in ID_MAP.it
 
 # Held-out = the structural skills we test the reversal curse on. The
 # data-rich affixes + repeat stay SEEN so Stage-2 RL has signal to learn from.
-HELD_OUT: list[str] = ["rotate_str", "mirror_str", "fancy_brackets"]
+HELD_OUT = ["rotate_str", "mirror_str", "duplicate_every_char"]
 SEEN: list[str] = [name for name in SKILLS if name not in HELD_OUT]
 ALL_SKILLS: list[str] = list(SKILLS)
 
