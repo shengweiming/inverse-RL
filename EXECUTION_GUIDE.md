@@ -60,16 +60,25 @@ utilities. On L4 set `eval_gpu_mem_util` as above.
   CSV was stale-loaded from an old file with the same name — per the skip-guard
   rule above, the per-skill **detail** CSV is the artifact of record.
 
-## Step 5 — [YOU] Held-out split swap (~20 min, no GPU)
+## Step 5 — DONE (history) — Held-out split swap (no GPU)
 
-Promote `mirror_str` to held out; `reverse_words` becomes SEEN (rationale: plan
-§3). Touchpoints — all four, or things bite:
-1. `inverse_tasks.py`: `HELD_OUT = ["rotate_str", "mirror_str", "fancy_brackets"]`
-   (one line; `SEEN` derives itself). Update the comment above it.
-2. `tests/test_tasks.py` → `test_held_out_seen_partition`: new literals
-   (`SEEN` order: repeat_str, reverse_words, add_prefix, add_suffix,
-   insert_separator, duplicate_every_char). Run `pytest -q`: 57 green.
-3. Notebook Cell 2: bump `DATA_CONTRACT` to `"v3-heldout-mirror"`.
+Landed in two refinements; the code/tests/notebook are on the final v4 split
+(`DATA_CONTRACT v4-heldout-duplicate`). Rationale and baselines: plan §3.
+- **v3** promoted `mirror_str` to held out and returned `reverse_words` to SEEN
+  (it is the identity on every reachable string — see plan §3).
+- **v4** (current) swaps `fancy_brackets ↔ duplicate_every_char`:
+  `fancy_brackets`'s payload is visually present (baseline 0.171, a weak probe),
+  so it moves to SEEN and the clean-structural `duplicate_every_char`
+  (baseline 0.000) is promoted, making the held-out cell uniformly the three
+  hardest structural skills.
+
+Final state, for reference (touchpoints — all four, or things bite):
+1. `inverse_tasks.py`: `HELD_OUT = ["rotate_str", "mirror_str", "duplicate_every_char"]`
+   (one line; `SEEN` derives itself).
+2. `tests/test_tasks.py` → `test_held_out_seen_partition`: `SEEN` order is
+   repeat_str, reverse_words, add_prefix, add_suffix, insert_separator,
+   fancy_brackets. `pytest -q` green (72 tests).
+3. Notebook Cell 2: `DATA_CONTRACT = "v4-heldout-duplicate"`.
 4. Drive: archive `results/stage1p5_inverse_skill_detail.csv` (rename, e.g.
    `..._v2split.csv` — it's a valid pre-swap baseline) and delete
    `results/stage1p5_inverse.csv` (stale anyway).
@@ -78,15 +87,37 @@ Also mine the archived detail CSV (free coverage preview): per-skill pass@8 and
 trainable fraction (problems with 0 < successes < 8). Then re-run Cell 5 on the
 regenerated eval set (one vLLM pass; L4 OK) for the post-swap G2 record.
 
-## Step 6 — [AGENT] Coverage probe (build) → [YOU] run (~1 L4-hour)
+## Step 6 — [AGENT] Coverage probe (built ✅) → [YOU] run (~1 L4-hour)
 
-New notebook cell or `scripts/coverage_probe.py`: load `ckpts/stage1_sft`,
-sample **16 rollouts at temperature 1.0** over ~500 problems from the
-regenerated `inv_l1_seen_train.jsonl`, score with `verifier.inverse_reward`,
-write `results/coverage_probe.csv` with per-problem success counts plus a
-per-skill summary: pass@16, **trainable fraction** (0 < c < 16), mean/95p
-completion tokens. Resumable (skip if CSV exists); reuse Cell-3 `generate()`.
-Acceptance: runs on L4; prints the G3 decision inputs.
+Built as `scripts/coverage_probe.py` — a standalone vLLM loader, NOT a
+notebook cell (keeps the CLAUDE.md cell-index map valid; as a subprocess it
+also returns all VRAM on exit, sidestepping gotchas 3–4). It samples **16
+rollouts at temperature 1.0** (top_p 1.0 — the GRPO rollout distribution, not
+Cell-3's eval recipe) over 500 problems from the regenerated
+`inv_l1_seen_train.jsonl`, scores with `verifier.inverse_reward`, writes
+`results/coverage_probe.csv` (one row per problem: skill, success_count/16,
+mean & p95 completion tokens) and prints the per-skill G3 decision inputs:
+pass@16 and **trainable fraction** (0 < c < 16). Stale-data guards hard-fail
+before any generation: `DATA_CONTRACT.txt` next to the data file must read
+`v4-heldout-duplicate`, and the file's skill census must be exactly the v4
+SEEN set. Resumable: skips entirely if the CSV exists (delete/archive to
+re-run); checkpoints partial progress to `coverage_probe.partial.csv` every
+100 problems and resumes from it after a session death.
+
+Run after Cells 0–3 on L4. `ckpts/stage1_sft/` is **already the merged
+full model** (Cell 4 saves the merged Stage-1 model there; the separate
+`ckpts/stage1_sft_adapter/` holds the raw LoRA adapter), so point `--ckpt`
+straight at it — no `load_model` merge step. The script refuses a bare LoRA
+adapter dir, which `stage1_sft/` is not (it has `config.json` + weight
+shards, no `adapter_config.json`):
+
+```python
+!python scripts/coverage_probe.py --ckpt {CKPT_DIR}/stage1_sft --data {DATA_DIR}/inv_l1_seen_train.jsonl --out {RESULTS_DIR}/coverage_probe.csv --gpu-mem-util 0.85
+```
+
+(Drive FUSE makes vLLM's load slow; `shutil.copytree(CKPT_DIR/"stage1_sft",
+"/content/stage1_sft")` first and pass `--ckpt /content/stage1_sft` to speed
+repeated loads — gotcha 2.) Acceptance: runs on L4; prints the G3 decision inputs.
 
 ## Step 7 — [YOU] Gate G3 decision (minutes)
 

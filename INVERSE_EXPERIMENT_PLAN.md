@@ -80,19 +80,31 @@ literals in code (`func_1(x, 3)`, `func_5(x, 'qz')`). Registry in
 | duplicate_every_char | func_14 | — | `s[::2]` | structural |
 | fancy_brackets | func_15 | — | `s[1::3]` | structural (semi-readable) |
 
-**Split (current, post-swap):**
-`HELD_OUT = [rotate_str, mirror_str, fancy_brackets]` ·
-`SEEN = [repeat_str, reverse_words, add_prefix, add_suffix, insert_separator, duplicate_every_char]`.
+**Split (current, post-swap — `DATA_CONTRACT v4-heldout-duplicate`):**
+`HELD_OUT = [rotate_str, mirror_str, duplicate_every_char]` ·
+`SEEN = [repeat_str, reverse_words, add_prefix, add_suffix, insert_separator, fancy_brackets]`.
 
-**Why the swap** (was `reverse_words` held out): the paper's input generator
-never emits spaces and no skill introduces one, so `reverse_words` is the
-**identity on every reachable string**. The Stage-1 corpus is the model's only
-source of `func_4` semantics, so its "inverse" is echo-the-output — useless as a
-held-out structural probe (it scored 0.56 at baseline vs 0.000 for true
-structural skills, inflating the held-out mean 3×). It stays SEEN; `mirror_str`
-(baseline 0.000) is promoted. `rotate_str` (0.000 over 33 problems) is the
-cleanest held-out skill for headline claims; treat `fancy_brackets` with caution
-(0.171 baseline — its payload is visually present between brackets).
+**Why the swap.** Two refinements landed in sequence; both push the held-out
+cell toward *clean structural* probes and out of contaminated ones.
+
+*v2→v3 (was `reverse_words` held out):* the paper's input generator never emits
+spaces and no skill introduces one, so `reverse_words` is the **identity on
+every reachable string**. The Stage-1 corpus is the model's only source of
+`func_4` semantics, so its "inverse" is echo-the-output — useless as a held-out
+structural probe (it scored 0.56 at baseline vs 0.000 for true structural
+skills, inflating the held-out mean 3×). It stays SEEN; `mirror_str`
+(baseline 0.000) is promoted.
+
+*v3→v4 (was `fancy_brackets` held out):* `fancy_brackets` is the weakest of the
+candidate held-out probes — its payload is **visually present between the
+brackets**, so the baseline already scores 0.171/35 (semi-readable, not a true
+reversal curse). `duplicate_every_char` is a clean structural transform
+(baseline 0.000/10, no readable payload), so it is promoted to held-out and
+`fancy_brackets` demoted to SEEN. The held-out cell is now uniformly the three
+hardest structural skills — `rotate_str` (0.000/33), `mirror_str` (0.000/24),
+`duplicate_every_char` (0.000/10) — which is the strongest version of the
+headline transfer test. `rotate_str` remains the cleanest single skill for
+headline claims.
 
 ## 4. Stage 1 (done) — Gate G1 ✅
 
@@ -153,8 +165,8 @@ coverage allows).
 ## 7. Coverage risk (the known failure mode)
 
 GRPO/DAPO-style training only learns from problems with mixed-correctness
-groups. Baseline pass@1 on SEEN structural skills is ~0 (duplicate 0.000,
-insert_separator 0.056); if pass@16 at temp 1.0 is also ≈0, RL never trains on
+groups. Baseline pass@1 on SEEN structural skills is low (insert_separator
+0.056, fancy_brackets 0.171); if pass@16 at temp 1.0 is also ≈0, RL never trains on
 them and "inversion" is learned only from affix-stripping — H1's transfer hope
 dies before training starts. Hence the mandatory **coverage probe** before any
 trainer is built: 16 rollouts at temp 1.0 over ~500 `inv_l1_seen_train`
@@ -164,7 +176,7 @@ detail CSV already contains pass@8 at temp 0.7 per problem.)
 
 ## 8. Evaluation protocol & metrics
 
-Fixed eval sets (regenerated under `DATA_CONTRACT v3` after the split swap):
+Fixed eval sets (regenerated under `DATA_CONTRACT v4-heldout-duplicate` after the split swap):
 `inv_l1to4_eval.jsonl`, `fwd_l1to4_eval.jsonl` (levels 1–4 × seen/held-out
 cells, 100 problems/cell, seeds fixed).
 

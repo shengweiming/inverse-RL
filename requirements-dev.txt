@@ -1,2 +1,3 @@
 # CPU-only dev deps for unit tests; GPU stack (torch/vllm/transformers/...) is Colab-only.
 pytest
+numpy
