@@ -104,17 +104,20 @@ SEEN set. Resumable: skips entirely if the CSV exists (delete/archive to
 re-run); checkpoints partial progress to `coverage_probe.partial.csv` every
 100 problems and resumes from it after a session death.
 
-Run after Cells 0–3 on L4. The script needs the **merged** Stage-1 checkpoint
-(it refuses a bare LoRA adapter dir); Cell-3 `load_model` produces and caches
-the merge:
+Run after Cells 0–3 on L4. `ckpts/stage1_sft/` is **already the merged
+full model** (Cell 4 saves the merged Stage-1 model there; the separate
+`ckpts/stage1_sft_adapter/` holds the raw LoRA adapter), so point `--ckpt`
+straight at it — no `load_model` merge step. The script refuses a bare LoRA
+adapter dir, which `stage1_sft/` is not (it has `config.json` + weight
+shards, no `adapter_config.json`):
 
 ```python
-ckpt = load_model(CFG["model_name"], CKPT_DIR / "stage1_sft")["model_path"]
-!python scripts/coverage_probe.py --ckpt {ckpt} --data {DATA_DIR}/inv_l1_seen_train.jsonl --out {RESULTS_DIR}/coverage_probe.csv --gpu-mem-util 0.85
+!python scripts/coverage_probe.py --ckpt {CKPT_DIR}/stage1_sft --data {DATA_DIR}/inv_l1_seen_train.jsonl --out {RESULTS_DIR}/coverage_probe.csv --gpu-mem-util 0.85
 ```
 
-(Per gotcha 2, copying the merged checkpoint to `/content/` first makes the
-vLLM load much faster.) Acceptance: runs on L4; prints the G3 decision inputs.
+(Drive FUSE makes vLLM's load slow; `shutil.copytree(CKPT_DIR/"stage1_sft",
+"/content/stage1_sft")` first and pass `--ckpt /content/stage1_sft` to speed
+repeated loads — gotcha 2.) Acceptance: runs on L4; prints the G3 decision inputs.
 
 ## Step 7 — [YOU] Gate G3 decision (minutes)
 
