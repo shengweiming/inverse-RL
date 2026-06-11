@@ -60,16 +60,25 @@ utilities. On L4 set `eval_gpu_mem_util` as above.
   CSV was stale-loaded from an old file with the same name — per the skip-guard
   rule above, the per-skill **detail** CSV is the artifact of record.
 
-## Step 5 — [YOU] Held-out split swap (~20 min, no GPU)
+## Step 5 — DONE (history) — Held-out split swap (no GPU)
 
-Promote `mirror_str` to held out; `reverse_words` becomes SEEN (rationale: plan
-§3). Touchpoints — all four, or things bite:
-1. `inverse_tasks.py`: `HELD_OUT = ["rotate_str", "mirror_str", "fancy_brackets"]`
-   (one line; `SEEN` derives itself). Update the comment above it.
-2. `tests/test_tasks.py` → `test_held_out_seen_partition`: new literals
-   (`SEEN` order: repeat_str, reverse_words, add_prefix, add_suffix,
-   insert_separator, duplicate_every_char). Run `pytest -q`: 57 green.
-3. Notebook Cell 2: bump `DATA_CONTRACT` to `"v3-heldout-mirror"`.
+Landed in two refinements; the code/tests/notebook are on the final v4 split
+(`DATA_CONTRACT v4-heldout-duplicate`). Rationale and baselines: plan §3.
+- **v3** promoted `mirror_str` to held out and returned `reverse_words` to SEEN
+  (it is the identity on every reachable string — see plan §3).
+- **v4** (current) swaps `fancy_brackets ↔ duplicate_every_char`:
+  `fancy_brackets`'s payload is visually present (baseline 0.171, a weak probe),
+  so it moves to SEEN and the clean-structural `duplicate_every_char`
+  (baseline 0.000) is promoted, making the held-out cell uniformly the three
+  hardest structural skills.
+
+Final state, for reference (touchpoints — all four, or things bite):
+1. `inverse_tasks.py`: `HELD_OUT = ["rotate_str", "mirror_str", "duplicate_every_char"]`
+   (one line; `SEEN` derives itself).
+2. `tests/test_tasks.py` → `test_held_out_seen_partition`: `SEEN` order is
+   repeat_str, reverse_words, add_prefix, add_suffix, insert_separator,
+   fancy_brackets. `pytest -q` green (72 tests).
+3. Notebook Cell 2: `DATA_CONTRACT = "v4-heldout-duplicate"`.
 4. Drive: archive `results/stage1p5_inverse_skill_detail.csv` (rename, e.g.
    `..._v2split.csv` — it's a valid pre-swap baseline) and delete
    `results/stage1p5_inverse.csv` (stale anyway).

@@ -91,11 +91,11 @@ Cell 4 = index 6, Cell 5 = index 7, stubs at 8–10.
 
 ## Current state & next tasks
 
-Done: Gates G1, G2 (numbers in plan §4–5); split swap (code/notebook are on
-`DATA_CONTRACT v4-heldout-duplicate`, `HELD_OUT = [rotate_str, mirror_str,
-duplicate_every_char]` — note plan §3 / EXECUTION_GUIDE Step 5 still describe
-the v3 split and need a human doc pass); coverage probe built
-(`scripts/coverage_probe.py`, Step 6 — Colab run on L4 pending). Agent tasks
-queued, in order: Cell 7 GRPO arm (Step 8), Cell 6 iterative-RFT arm (Step 9),
-analysis (Step 10). Specs for each are in the guide; hypotheses and gate
-criteria in the plan.
+Done: Gates G1, G2 (numbers in plan §4–5); split swap complete and reconciled
+across code, tests, notebook, and docs — all on `DATA_CONTRACT v4-heldout-duplicate`,
+`HELD_OUT = [rotate_str, mirror_str, duplicate_every_char]`,
+`SEEN = [repeat_str, reverse_words, add_prefix, add_suffix, insert_separator, fancy_brackets]`
+(rationale in plan §3); coverage probe built (`scripts/coverage_probe.py`,
+Step 6 — Colab run on L4 pending). Agent tasks queued, in order: Cell 7 GRPO
+arm (Step 8), Cell 6 iterative-RFT arm (Step 9), analysis (Step 10). Specs for
+each are in the guide; hypotheses and gate criteria in the plan.
