@@ -96,6 +96,12 @@ across code, tests, notebook, and docs — all on `DATA_CONTRACT v4-heldout-dupl
 `HELD_OUT = [rotate_str, mirror_str, duplicate_every_char]`,
 `SEEN = [repeat_str, reverse_words, add_prefix, add_suffix, insert_separator, fancy_brackets]`
 (rationale in plan §3); coverage probe built (`scripts/coverage_probe.py`,
-Step 6 — Colab run on L4 pending). Agent tasks queued, in order: Cell 7 GRPO
-arm (Step 8), Cell 6 iterative-RFT arm (Step 9), analysis (Step 10). Specs for
-each are in the guide; hypotheses and gate criteria in the plan.
+Step 6 — Colab run on L4 pending); G3 decided (inverse-only pool, B~50k,
+`results/G3_DECISION.md`). Cell 7 Arm-A GRPO trainer built (Step 8): TRL
+GRPOTrainer + fresh LoRA r=32 on the merged Stage-1 base, pinned DAPO recipe
+(beta=0, num_iterations=1, entropy=0, scale_rewards=False), inverse-only
+`batch_inverse_reward`, oversample-refill dynamic sampling with pre/post-filter
+group logging, per-skill W&B + held-out eval hook, resumable adapter
+checkpoints. `SMOKE`/`PREFLIGHT_3B` flags gate the L4 pre-flights before A100;
+run pending. Agent tasks queued, in order: Cell 6 iterative-RFT arm (Step 9),
+analysis (Step 10). Specs for each are in the guide; gate criteria in the plan.
