@@ -47,10 +47,15 @@ There is no GPU in the dev environment. GPU work happens only in
   All problems are x-form (constant/binary forms have no recoverable preimage).
 - **`prompts.py`** — `FORWARD_PROMPT` is **byte-identical to the paper's**
   (Stage-1 train/eval distribution match). `extract_last_json` parses answers.
-- **`notebooks/inverse_rl_colab.ipynb`** — 11 cells. Cell 0 setup (shell
-  magics; the only non-pure-Python cell), 1 Drive/CFG/state, 2 data gen,
-  3 eval utilities (vLLM lifecycle: `release_llm()`), smoke flag, 4 Stage-1 SFT
-  (done), 5 Stage-1.5 baseline (done), 6–8 Stage-2 stubs (current work).
+- **`notebooks/inverse_rl_colab.ipynb`** — 11 cells, reordered for the Stage-2
+  flow. Notebook index 0 markdown header, 1 setup (Cell 0; shell magics, the
+  only non-pure-Python cell), 2 Drive/CFG/state (Cell 1), 3 data gen (Cell 2),
+  4 eval utilities (Cell 3; vLLM lifecycle `release_llm()`), 5 **Load Stage-1
+  model** (locates the merged `stage1_sft` on Drive; the lightweight stand-in
+  now that SFT is done), 6 Cell 6 composition-control stub, 7 **Cell 7 Arm-A
+  GRPO trainer**, 8 Cell 8 analysis stub. The finished, now-demoted Stage-1 SFT
+  (Cell 4) and Stage-1.5 baseline (Cell 5) are archived at the END (indices
+  9–10), banner-tagged `[DEMOTED]` — kept for re-run, not in the normal flow.
 
 ## Invariants — do not break
 
@@ -75,11 +80,14 @@ There is no GPU in the dev environment. GPU work happens only in
 ## Notebook editing rules
 
 Edit the `.ipynb` JSON programmatically (json.load → mutate `cells[i]["source"]`
-as keepends-split lines → dump with `indent=2`, trailing newline). Cells 1–10
-except Cell 0 must `ast.parse`. Clear `outputs` and `execution_count` on edited
-cells. Don't touch untargeted cells. Cell indices: markdown header is index 0,
-"Cell N" lives at notebook index N+1 through the smoke flag (index 5), then
-Cell 4 = index 6, Cell 5 = index 7, stubs at 8–10.
+as keepends-split lines → dump with `indent=2`, trailing newline). Every code
+cell except setup (notebook index 1) must `ast.parse`. Clear `outputs` and
+`execution_count` on edited cells. Don't touch untargeted cells. The deck was
+reordered, so **identify cells by their header comment, not a fixed index**
+(`find(substr)` over `"".join(cell["source"])`). Current layout: index 0 md
+header, 1 setup (Cell 0), 2 Cell 1, 3 Cell 2, 4 Cell 3, 5 Load Stage-1 model,
+6 Cell 6 stub, 7 Cell 7 Arm-A GRPO, 8 Cell 8 stub, 9 demoted Cell 4 SFT,
+10 demoted Cell 5 baseline.
 
 ## Known environment traps (Colab)
 
